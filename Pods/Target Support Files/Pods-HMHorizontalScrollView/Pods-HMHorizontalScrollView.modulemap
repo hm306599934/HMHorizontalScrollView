@@ -1,0 +1,6 @@
+framework module Pods_HMHorizontalScrollView {
+  umbrella header "Pods-HMHorizontalScrollView-umbrella.h"
+
+  export *
+  module * { export * }
+}
