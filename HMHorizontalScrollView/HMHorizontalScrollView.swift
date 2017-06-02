@@ -7,8 +7,8 @@
 //
 //  横向滑动的scrollView，面向协议编程，复用cell
 
-import UIKit
 import SnapKit
+import UIKit
 
 protocol HMHorizontalScrollViewDataSource: NSObjectProtocol {
     // cell数量
@@ -21,19 +21,28 @@ protocol HMHorizontalScrollViewDataSource: NSObjectProtocol {
     func horizontalScrollView(in horizontalScrollView: HMHorizontalScrollView, cellAt index: Index) -> HMHorizontalScrollCell
 }
 
+protocol HMHorizontalScrollViewDelegate: NSObjectProtocol {
+    // 点击
+    func horizontalScrollView(in horizontalScrollView: HMHorizontalScrollView, didSelectAt index: Index)
+}
+
 class HMHorizontalScrollView: UIView {
-    
+    // 数据源
     weak var dataSource: HMHorizontalScrollViewDataSource?
-    
+    // 委托
+    weak var delegate: HMHorizontalScrollViewDelegate?
+    // 委托
+    var separatorWidth: CGFloat = 0
+    // cell的数量
     fileprivate var numberOfCells: Int {
         return dataSource?.numberOfCells(in: self) ?? 0
     }
-    
+    // cell尺寸
     fileprivate var cellSize: CGSize {
         return dataSource?.horizontalScrollView(self, cellSizeAt: 0) ?? CGSize()
     }
-    
-    fileprivate var width: CGFloat {
+    // 界面宽度
+    fileprivate var viewWidth: CGFloat {
         return dataSource?.viewWidth(in: self) ?? 0
     }
     
@@ -56,42 +65,53 @@ class HMHorizontalScrollView: UIView {
             make.centerY.equalTo(self)
             make.height.equalTo(self)
         }
-
+        
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTap)))
     }
     
+    /// 重新加载界面
     func reloadView() {
+        cells.removeAll()
         
         for view in scrollView.subviews {
             view.removeFromSuperview()
         }
         
-        //偏移量
-        var offX: CGFloat = 0
+        // 偏移量
+        var offX: CGFloat = separatorWidth
         
-        // 添加收藏点
-        hm_for(cells) { cell, index in
+        // 初始化cells
+        for i in 0 ..< self.numberOfCacheView  {
+            let cell = dataSource?.horizontalScrollView(in: self, cellAt: i)
+            cell?.frame = CGRect(x: offX, y: 0, width: cellSize.width, height: cellSize.height)
+            cell?.setNeedsDisplay()
             
-            let newCell = dataSource?.horizontalScrollView(in: self, cellAt: index)
-            newCell?.frame = CGRect(x: offX, y: 0, width: cellSize.width, height: cellSize.height)
-            
-            if let newCell = newCell {
-                scrollView.addSubview(newCell)
+            if let cell = cell {
+                scrollView.addSubview(cell)
+                cells.append(cell)
             }
             
-            offX += cellSize.width
+            offX += cellSize.width + separatorWidth
         }
         
-        let contentWidth = (cellSize.width) * CGFloat(numberOfCells) < hm_screenWidth ? hm_screenWidth + 1 : (cellSize.width) * CGFloat(numberOfCells)
+        // 当不足一屏时，添加一个像素用于触发弹簧效果
+        let tempWidth = cellSize.width * CGFloat(numberOfCells) + separatorWidth * (CGFloat(numberOfCells) + 1)
+        let contentWidth = tempWidth <= hm_screenWidth ? hm_screenWidth + 1 : tempWidth
         scrollView.contentSize = CGSize(width: contentWidth, height: 0)
     }
     
+    /// 获取复用的cell
+    ///
+    /// - Parameter index: 索引
+    /// - Returns: 对应的cell
     func dequeueReusableCell(at index: Index) -> HMHorizontalScrollCell? {
         
         for cell in cells {
             
-            let cellX = CGFloat(index) * cellSize.width
+            let cellX = CGFloat(index) * cellSize.width + separatorWidth * CGFloat(index + 1)
             
-            if cellX >= cell.frame.origin.x && cellX < (cell.frame.origin.x + cellSize.width) {
+            if cellX >= cell.frame.origin.x &&
+                cellX < (cell.frame.origin.x + cellSize.width) {
                 return cell
             }
         }
@@ -99,43 +119,56 @@ class HMHorizontalScrollView: UIView {
         return nil
     }
     
-// MARK: - 🤡初始化
+    /// 获取cell
+    ///
+    /// - Parameter index: 索引
+    /// - Returns: 对应的cell
+    func getCell(at index: Index) -> HMHorizontalScrollCell? {
+        
+        return dequeueReusableCell(at: index)
+    }
+    
+    // MARK: - 🤡手势
+    
+    func didTap(recognizer: UITapGestureRecognizer) {
+        
+        let tapPoint = recognizer.location(in: self)
+        
+        let cellIndex = Int((tapPoint.x  + scrollView.contentOffset.x) / (cellSize.width + separatorWidth))
+        delegate?.horizontalScrollView(in: self, didSelectAt: cellIndex)
+    }
+    
+    // MARK: - 🤡初始化
     
     fileprivate lazy var scrollView: UIScrollView = {
         let result = UIScrollView()
         result.showsHorizontalScrollIndicator = false
         result.showsVerticalScrollIndicator = false
         result.isPagingEnabled = false
-        result.backgroundColor = .red
         result.delegate = self
         result.contentOffset = CGPoint()
         
         return result
     }()
     
+    /// 缓存的cell,最多只保留maxNumberOfCacheView个，可能小于maxNumberOfCacheView
     fileprivate lazy var cells: [HMHorizontalScrollCell] = {
         
         var result = [HMHorizontalScrollCell]()
         
-        // 添加收藏点
-        for i in 0 ..< self.numberOfCacheView  {
-            let cell = HMHorizontalScrollCell(frame: CGRect())
-            cell.frame = CGRect(x: CGFloat(i) * self.cellSize.width, y: 0, width: self.cellSize.width, height: self.cellSize.height)
-            
-            result.append(cell)
-        }
-        
         return result
     }()
     
+    /// 缓存cell个数
     fileprivate var numberOfCacheView: Int {
         return self.numberOfCells < maxNumberOfCacheView ? self.numberOfCells : maxNumberOfCacheView
     }
     
+    /// 最大缓存个数，当数据源较小时，不需要进行缓存
     fileprivate var maxNumberOfCacheView: Int {
-        return Int(width / cellSize.width) + 3
+        return Int(viewWidth / (cellSize.width + separatorWidth)) + 3
     }
-
+    
 }
 
 // MARK: - 🤡UIScrollView Delegate
@@ -143,7 +176,7 @@ class HMHorizontalScrollView: UIView {
 extension HMHorizontalScrollView: UIScrollViewDelegate {
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // 第一次次进来会向下滑动64
+        // 第一次次进来会可能向下滑动64
         scrollView.contentOffset.y = 0
         
         if numberOfCacheView < maxNumberOfCacheView {
@@ -158,19 +191,23 @@ extension HMHorizontalScrollView: UIScrollViewDelegate {
             // 滑到最后一个
             resetItemViewOfEnd()
             
-        } else if cells[1].frame.origin.x + cells[0].w < scrollView.contentOffset.x  {
+        } else if cells[1].frame.origin.x + cells[0].w + separatorWidth < scrollView.contentOffset.x  {
             // 左滑
             resetItemViewOfLeftPan()
             // 更新最后一个显示
-            let lastCellIndex = Int((cells.last?.frame.origin.x ?? 0) / cellSize.width)
-            _ = dataSource?.horizontalScrollView(in: self, cellAt: lastCellIndex)
+            let lastCellIndex = Int((cells.last?.frame.origin.x ?? 0) / (cellSize.width + separatorWidth))
+            if lastCellIndex > 0 && lastCellIndex < numberOfCells {
+                _ = dataSource?.horizontalScrollView(in: self, cellAt: lastCellIndex)
+            }
             
         } else if cells[numberOfCacheView - 2].frame.origin.x > scrollView.contentOffset.x + scrollView.frame.width {
             // 右滑
             resetItemViewOfRightPan()
             // 更新第一个显示
-            let firstCellIndex = Int((cells.first?.frame.origin.x ?? 0) / cellSize.width)
-            _ = dataSource?.horizontalScrollView(in: self, cellAt: firstCellIndex)
+            let firstCellIndex = Int((cells.first?.frame.origin.x ?? 0) / (cellSize.width + separatorWidth))
+            if firstCellIndex > 0 && firstCellIndex < numberOfCells {
+                _ = dataSource?.horizontalScrollView(in: self, cellAt: firstCellIndex)
+            }
         }
         
     }
@@ -179,27 +216,32 @@ extension HMHorizontalScrollView: UIScrollViewDelegate {
     func resetItemViewOfStart() {
         
         hm_for(cells) { cell, index in
-            cell.frame.origin.x = cell.frame.width * CGFloat(index)
             
-            _ = dataSource?.horizontalScrollView(in: self, cellAt: Int(cell.frame.origin.x / cellSize.width))
+            cell.x = separatorWidth + (cellSize.width + separatorWidth) * CGFloat(index)
+            
+            if let index = indexOf(x: cell.x) {
+                _ = dataSource?.horizontalScrollView(in: self, cellAt: index)
+            }
         }
     }
     
-     // 滑到最后一个
+    // 滑到最后一个
     func resetItemViewOfEnd() {
         
         hm_for(cells) { cell, index in
-            cell.frame.origin.x = scrollView.contentSize.width - cell.frame.width * CGFloat(numberOfCacheView - index)
+            cell.x = scrollView.contentSize.width - (cellSize.width + separatorWidth) * CGFloat(numberOfCacheView - index)
             
-            _ = dataSource?.horizontalScrollView(in: self, cellAt: Int(cell.frame.origin.x / cellSize.width))
+            if let index = indexOf(x: cell.x) {
+                _ = dataSource?.horizontalScrollView(in: self, cellAt: index)
+            }
         }
     }
     
-     // 左滑
+    // 左滑
     func resetItemViewOfLeftPan() {
         
         let temp = cells.first!
-        temp.frame.origin.x = cells.last!.frame.origin.x + temp.w
+        temp.x = cells.last!.x + (cellSize.width + separatorWidth)
         
         hm_for(cells) { (cell, index) in
             if index < cells.count - 1 {
@@ -214,7 +256,7 @@ extension HMHorizontalScrollView: UIScrollViewDelegate {
     func resetItemViewOfRightPan() {
         
         let temp = cells.last!
-        temp.frame.origin.x = cells.first!.frame.origin.x - temp.w
+        temp.x = cells.first!.x - (cellSize.width + separatorWidth)
         
         hm_for(cells) { (cell, index) in
             if index < cells.count - 1 {
@@ -224,6 +266,15 @@ extension HMHorizontalScrollView: UIScrollViewDelegate {
             }
         }
     }
+    
+    func indexOf(x: CGFloat) -> Index? {
+        
+        if cellSize.width + separatorWidth != 0 {
+            return Int(x / (cellSize.width + separatorWidth))
+        }
+        
+        return nil
+    }
 }
 
 // MARK: - 🤡显示界面
@@ -232,58 +283,13 @@ class HMHorizontalScrollCell: UIView {
     
     override init(frame: CGRect) {
         super.init(frame: frame)
-        setUp()
+        
     }
     
     required init?(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)
-        setUp()
-    }
-    
-    func setUp() {
-        
-        backgroundColor = .green
-        
-        addSubview(imageView)
-        imageView.snp.remakeConstraints { (make) in
-            make.edges.equalTo(self)
-        }
-        
-        addSubview(titleLabel)
-        titleLabel.snp.remakeConstraints { (make) in
-            make.edges.equalTo(self)
-        }
-    }
-    
-    override func draw(_ rect: CGRect) {
-        
         
     }
     
-    override func layoutSubviews() {
-        superview?.layoutSubviews()
-    }
-    
-    
-    lazy var imageView: UIImageView = {
-        
-        let result = UIImageView()
-        result.isHidden = false
-        result.image = UIImage(named: "bg")
-        
-        return result
-    }()
-    
-    
-    lazy var titleLabel: UILabel = {
-        
-        let result = UILabel()
-        result.isHidden = false
-        result.font = UIFont.systemFont(ofSize: 13)
-        result.textAlignment = .center
-        result.textColor = .blue
-        result.text = "123"
-        
-        return result
-    }()
 }
+
